@@ -1,0 +1,10 @@
+node_modules/
+dist/
+out/
+.vite/
+*.log
+*.local
+settings.json
+projects.json
+diary.json
+backups/
