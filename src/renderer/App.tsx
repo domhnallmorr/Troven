@@ -159,6 +159,7 @@ export function App() {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false)
   const [isProjectsManagerOpen, setIsProjectsManagerOpen] = useState(false)
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null)
   const [isQuickAccessGroupModalOpen, setIsQuickAccessGroupModalOpen] = useState(false)
   const [isQuickAccessLinkModalOpen, setIsQuickAccessLinkModalOpen] = useState(false)
   const [quickAccessLinkGroupId, setQuickAccessLinkGroupId] = useState<string | null>(null)
@@ -532,6 +533,7 @@ export function App() {
         setIsRenameModalOpen(false)
         setIsTabFilterModalOpen(false)
         setIsProjectModalOpen(false)
+        setEditingProjectId(null)
         setIsProjectsManagerOpen(false)
         setIsQuickAccessGroupModalOpen(false)
         setIsQuickAccessLinkModalOpen(false)
@@ -1111,18 +1113,51 @@ export function App() {
   }
 
   function openNewProjectModal() {
+    setEditingProjectId(null)
     setDraftProjectName('')
     setDraftCustomer('')
     setDraftProjectNumber('')
     setIsProjectModalOpen(true)
   }
 
-  async function createNewProject(event: FormEvent<HTMLFormElement>) {
+  function openEditProjectModal(project: Project) {
+    setEditingProjectId(project.id)
+    setDraftProjectName(project.name)
+    setDraftCustomer(project.customer)
+    setDraftProjectNumber(project.projectNumber)
+    setIsProjectsManagerOpen(false)
+    setIsProjectModalOpen(true)
+  }
+
+  async function saveProjectMetadata(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const now = Date.now()
     const projectName = draftProjectName.trim()
 
     if (!projectName) {
+      return
+    }
+
+    if (editingProjectId) {
+      const project = projects.find((candidate) => candidate.id === editingProjectId)
+
+      if (!project) {
+        setIsProjectModalOpen(false)
+        setEditingProjectId(null)
+        return
+      }
+
+      const savedProject = await window.troven.saveProject({
+        ...project,
+        name: projectName,
+        customer: draftCustomer.trim(),
+        projectNumber: draftProjectNumber.trim(),
+        updatedAt: now,
+      })
+
+      setProjects((currentProjects) => upsertProject(currentProjects, savedProject))
+      setIsProjectModalOpen(false)
+      setEditingProjectId(null)
       return
     }
 
@@ -1148,6 +1183,7 @@ export function App() {
     setIsEditingPath(false)
     setClipboardState(null)
     setIsProjectModalOpen(false)
+    setEditingProjectId(null)
   }
 
   async function loadProject(project: Project) {
@@ -2482,10 +2518,14 @@ export function App() {
 
       {isProjectModalOpen ? (
         <div className="modal-backdrop" role="presentation">
-          <form className="modal settings-modal" onSubmit={createNewProject}>
+          <form className="modal settings-modal" onSubmit={saveProjectMetadata}>
             <header className="modal-header">
-              <h2>New Project</h2>
-              <p>Create an active project with a blank starting tab.</p>
+              <h2>{editingProjectId ? 'Edit Project' : 'New Project'}</h2>
+              <p>
+                {editingProjectId
+                  ? 'Update this project metadata.'
+                  : 'Create an active project with a blank starting tab.'}
+              </p>
             </header>
 
             <label className="field-label" htmlFor="project-name">
@@ -2530,7 +2570,10 @@ export function App() {
               </button>
               <button
                 className="secondary-action"
-                onClick={() => setIsProjectModalOpen(false)}
+                onClick={() => {
+                  setIsProjectModalOpen(false)
+                  setEditingProjectId(null)
+                }}
                 type="button"
               >
                 Cancel
@@ -2863,6 +2906,14 @@ export function App() {
                       </button>
                       <button
                         className="secondary-action compact-secondary"
+                        onClick={() => openEditProjectModal(project)}
+                        type="button"
+                      >
+                        <Edit3 size={15} />
+                        Edit
+                      </button>
+                      <button
+                        className="secondary-action compact-secondary"
                         onClick={(event) => archiveProject(project, event)}
                         type="button"
                       >
@@ -2894,6 +2945,14 @@ export function App() {
                       >
                         <FolderOpen size={15} />
                         Restore
+                      </button>
+                      <button
+                        className="secondary-action compact-secondary"
+                        onClick={() => openEditProjectModal(project)}
+                        type="button"
+                      >
+                        <Edit3 size={15} />
+                        Edit
                       </button>
                     </div>
                   ))}
