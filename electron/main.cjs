@@ -5,6 +5,7 @@ const path = require('node:path')
 const JSZip = require('jszip')
 const { PDFDocument } = require('pdf-lib')
 const { createDataStore } = require('./dataStore.cjs')
+const { getVisibleDirectoryEntries } = require('./fileSystemUtils.cjs')
 
 const isDev = !app.isPackaged
 const validThemes = new Set(['light', 'dark', 'slate'])
@@ -276,7 +277,7 @@ function createMainWindow() {
 }
 
 async function readDirectory(directoryPath) {
-  const entries = await fs.readdir(directoryPath, { withFileTypes: true })
+  const entries = getVisibleDirectoryEntries(await fs.readdir(directoryPath, { withFileTypes: true }))
 
   const files = await Promise.all(
     entries.map(async (entry) => {
@@ -518,6 +519,24 @@ async function copyPath(sourcePath, destinationPath) {
   await fs.copyFile(sourcePath, destinationPath, fs.constants.COPYFILE_EXCL)
 }
 
+async function replacePath(sourcePath, destinationPath, operation) {
+  const normalizedSourcePath = path.resolve(sourcePath).toLowerCase()
+  const normalizedDestinationPath = path.resolve(destinationPath).toLowerCase()
+
+  if (normalizedSourcePath === normalizedDestinationPath) {
+    return
+  }
+
+  await fs.rm(destinationPath, { force: true, recursive: true })
+
+  if (operation === 'copy') {
+    await copyPath(sourcePath, destinationPath)
+    return
+  }
+
+  await movePath(sourcePath, destinationPath)
+}
+
 async function movePath(sourcePath, destinationPath) {
   try {
     await fs.rename(sourcePath, destinationPath)
@@ -537,7 +556,22 @@ async function movePath(sourcePath, destinationPath) {
   }
 }
 
-async function pasteEntries(destinationDirectory, operation, sourcePaths) {
+async function getPasteConflictAction(focusedWindow, sourcePath, destinationPath) {
+  const result = await dialog.showMessageBox(focusedWindow, {
+    type: 'question',
+    buttons: ['Replace', 'Keep Both', 'Skip', 'Cancel'],
+    defaultId: 1,
+    cancelId: 3,
+    title: 'File already exists',
+    message: `An item named "${path.basename(destinationPath)}" already exists in this folder.`,
+    detail: `Source:\n${sourcePath}\n\nDestination:\n${destinationPath}`,
+    noLink: true,
+  })
+
+  return ['replace', 'keepBoth', 'skip', 'cancel'][result.response] || 'cancel'
+}
+
+async function pasteEntries(destinationDirectory, operation, sourcePaths, focusedWindow = null) {
   const normalizedOperation = String(operation)
 
   if (!['copy', 'cut'].includes(normalizedOperation)) {
@@ -547,9 +581,29 @@ async function pasteEntries(destinationDirectory, operation, sourcePaths) {
   const pastedPaths = []
 
   for (const sourcePath of sourcePaths) {
-    const destinationPath = await getAvailableDestinationPath(destinationDirectory, sourcePath)
+    const defaultDestinationPath = path.join(destinationDirectory, path.basename(sourcePath))
+    let destinationPath = defaultDestinationPath
+    let conflictAction = 'replace'
 
-    if (normalizedOperation === 'copy') {
+    if (await pathExists(defaultDestinationPath)) {
+      conflictAction = await getPasteConflictAction(focusedWindow, sourcePath, defaultDestinationPath)
+
+      if (conflictAction === 'cancel') {
+        break
+      }
+
+      if (conflictAction === 'skip') {
+        continue
+      }
+
+      if (conflictAction === 'keepBoth') {
+        destinationPath = await getAvailableDestinationPath(destinationDirectory, sourcePath)
+      }
+    }
+
+    if (conflictAction === 'replace') {
+      await replacePath(sourcePath, destinationPath, normalizedOperation)
+    } else if (normalizedOperation === 'copy') {
       await copyPath(sourcePath, destinationPath)
     } else {
       await movePath(sourcePath, destinationPath)
@@ -623,7 +677,7 @@ async function searchDirectory(rootPath, options) {
     let entries = []
 
     try {
-      entries = await fs.readdir(directoryPath, { withFileTypes: true })
+      entries = getVisibleDirectoryEntries(await fs.readdir(directoryPath, { withFileTypes: true }))
     } catch {
       continue
     }
@@ -770,7 +824,7 @@ app.whenReady().then(() => {
     createEntry(directoryPath, type, name),
   )
   ipcMain.handle('fs:paste-entries', async (_event, destinationDirectory, operation, sourcePaths) =>
-    pasteEntries(destinationDirectory, operation, sourcePaths),
+    pasteEntries(destinationDirectory, operation, sourcePaths, BrowserWindow.getFocusedWindow()),
   )
   ipcMain.handle('fs:duplicate-file', async (_event, sourcePath) => {
     const stats = await fs.stat(sourcePath)

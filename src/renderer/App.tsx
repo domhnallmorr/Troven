@@ -164,6 +164,10 @@ export function App() {
   const [isQuickAccessLinkModalOpen, setIsQuickAccessLinkModalOpen] = useState(false)
   const [quickAccessLinkGroupId, setQuickAccessLinkGroupId] = useState<string | null>(null)
   const [collapsedQuickAccessGroupIds, setCollapsedQuickAccessGroupIds] = useState<string[]>([])
+  const [draggedQuickAccessLink, setDraggedQuickAccessLink] = useState<{
+    groupId: string
+    linkId: string
+  } | null>(null)
   const [draftQuickAccessGroupName, setDraftQuickAccessGroupName] = useState('')
   const [draftQuickAccessLinkName, setDraftQuickAccessLinkName] = useState('')
   const [draftQuickAccessLinkPath, setDraftQuickAccessLinkPath] = useState('')
@@ -196,7 +200,7 @@ export function App() {
   const [entryContextMenu, setEntryContextMenu] = useState<{
     x: number
     y: number
-    entry: FileEntry
+    entry: FileEntry | null
   } | null>(null)
   const [clipboardState, setClipboardState] = useState<ClipboardState>(null)
   const [isRenameModalOpen, setIsRenameModalOpen] = useState(false)
@@ -885,6 +889,62 @@ export function App() {
     )
   }
 
+  function startQuickAccessLinkDrag(
+    event: DragEvent<HTMLDivElement>,
+    groupId: string,
+    linkId: string,
+  ) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', linkId)
+    setDraggedQuickAccessLink({ groupId, linkId })
+  }
+
+  function dragQuickAccessLinkOver(
+    event: DragEvent<HTMLDivElement>,
+    targetGroupId: string,
+    targetLinkId: string,
+  ) {
+    event.preventDefault()
+    const sourceLinkId = draggedQuickAccessLink?.linkId ?? event.dataTransfer.getData('text/plain')
+    const sourceGroupId = draggedQuickAccessLink?.groupId
+
+    if (!sourceLinkId || !sourceGroupId || sourceGroupId !== targetGroupId || sourceLinkId === targetLinkId) {
+      return
+    }
+
+    setSettings((currentSettings) => ({
+      ...currentSettings,
+      quickAccessGroups: currentSettings.quickAccessGroups.map((group) => {
+        if (group.id !== targetGroupId) {
+          return group
+        }
+
+        const sourceIndex = group.links.findIndex((link) => link.id === sourceLinkId)
+        const targetIndex = group.links.findIndex((link) => link.id === targetLinkId)
+
+        if (sourceIndex === -1 || targetIndex === -1 || sourceIndex === targetIndex) {
+          return group
+        }
+
+        const nextLinks = [...group.links]
+        const [movedLink] = nextLinks.splice(sourceIndex, 1)
+        nextLinks.splice(targetIndex, 0, movedLink)
+        return { ...group, links: nextLinks }
+      }),
+    }))
+  }
+
+  function finishQuickAccessLinkDrag() {
+    setSettings((currentSettings) => {
+      void window.troven
+        .updateSettings({ quickAccessGroups: currentSettings.quickAccessGroups })
+        .then(setSettings)
+        .catch(() => undefined)
+      return currentSettings
+    })
+    setDraggedQuickAccessLink(null)
+  }
+
   function openDiary(date = getLocalDateKey(new Date())) {
     const entry = diaryEntries[date]
 
@@ -1259,6 +1319,7 @@ export function App() {
 
   const breadcrumbs = useMemo(() => getBreadcrumbs(explorer.currentPath), [explorer.currentPath])
   const defaultTabName = useMemo(() => getDefaultTabName(explorer.currentPath), [explorer.currentPath])
+  const contextEntry = entryContextMenu?.entry ?? null
 
   function openTabContextMenu(event: MouseEvent<HTMLButtonElement>, tabId: string) {
     event.preventDefault()
@@ -1434,6 +1495,7 @@ export function App() {
 
   function openEntryContextMenu(event: MouseEvent<HTMLTableRowElement>, entry: FileEntry) {
     event.preventDefault()
+    event.stopPropagation()
     const nextSelection = selectedEntryPaths.includes(entry.path) ? selectedEntryPaths : [entry.path]
     setSelectedEntryPaths(nextSelection)
     setLastSelectedEntryPath(entry.path)
@@ -1445,6 +1507,24 @@ export function App() {
     setIsOpenWithMenuOpen(false)
     setOpenWithMenuPosition(null)
     setEntryContextMenu({ x: event.clientX, y: event.clientY, entry })
+  }
+
+  function openFolderContextMenu(event: MouseEvent<HTMLDivElement>) {
+    if (!explorer.currentPath) {
+      return
+    }
+
+    event.preventDefault()
+    setSelectedEntryPaths([])
+    setLastSelectedEntryPath(null)
+    setTabContextMenu(null)
+    setIsFilterMenuOpen(false)
+    setFilterMenuPosition(null)
+    setIsNewMenuOpen(false)
+    setNewMenuPosition(null)
+    setIsOpenWithMenuOpen(false)
+    setOpenWithMenuPosition(null)
+    setEntryContextMenu({ x: event.clientX, y: event.clientY, entry: null })
   }
 
   async function copyEntryText(value: string) {
@@ -1538,9 +1618,9 @@ export function App() {
     }
   }
 
-  async function openInCmd(entry: FileEntry) {
+  async function openInCmd(targetPath: string) {
     try {
-      await window.troven.openInCmd(entry.path)
+      await window.troven.openInCmd(targetPath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to open Command Prompt.'
       await window.troven.showErrorDialog('Open in CMD failed', message)
@@ -1549,9 +1629,9 @@ export function App() {
     }
   }
 
-  async function openInExplorer(entry: FileEntry) {
+  async function openInExplorer(targetPath: string) {
     try {
-      await window.troven.openInExplorer(entry.path)
+      await window.troven.openInExplorer(targetPath)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to open File Explorer.'
       await window.troven.showErrorDialog('Open in Explorer failed', message)
@@ -1617,7 +1697,7 @@ export function App() {
   }
 
   function setFileTypeFilter(mode: 'all' | 'show' | 'hide') {
-    if (!entryContextMenu) {
+    if (!entryContextMenu?.entry) {
       return
     }
 
@@ -1837,7 +1917,17 @@ export function App() {
 
                   {!isCollapsed
                     ? group.links.map((link) => (
-                        <div className="custom-quick-access-row" key={link.id}>
+                        <div
+                          className={`custom-quick-access-row ${
+                            draggedQuickAccessLink?.linkId === link.id ? 'dragging' : ''
+                          }`}
+                          draggable
+                          key={link.id}
+                          onDragEnd={finishQuickAccessLinkDrag}
+                          onDragOver={(event) => dragQuickAccessLinkOver(event, group.id, link.id)}
+                          onDragStart={(event) => startQuickAccessLinkDrag(event, group.id, link.id)}
+                          onDrop={finishQuickAccessLinkDrag}
+                        >
                           <button
                             className="quick-access-link"
                             onClick={() => openQuickAccessPath(link.path)}
@@ -1962,21 +2052,24 @@ export function App() {
                   }}
                 >
                   {breadcrumbs.length > 0 ? (
-                    breadcrumbs.map((breadcrumb, index) => (
-                      <span className="breadcrumb-part" key={`${breadcrumb.path}-${index}`}>
-                        {index > 0 ? (
-                          <ChevronRight className="breadcrumb-separator" size={14} />
-                        ) : null}
-                        <button
-                          className="breadcrumb-button"
-                          onClick={() => loadDirectory(breadcrumb.path, { pushHistory: true })}
-                          onDoubleClick={(event) => event.stopPropagation()}
-                          type="button"
-                        >
-                          {breadcrumb.label}
-                        </button>
-                      </span>
-                    ))
+                    breadcrumbs
+                      .map((breadcrumb, index) => ({ breadcrumb, index }))
+                      .reverse()
+                      .map(({ breadcrumb, index }) => (
+                        <span className="breadcrumb-part" key={`${breadcrumb.path}-${index}`}>
+                          {index > 0 ? (
+                            <ChevronRight className="breadcrumb-separator" size={14} />
+                          ) : null}
+                          <button
+                            className="breadcrumb-button"
+                            onClick={() => loadDirectory(breadcrumb.path, { pushHistory: true })}
+                            onDoubleClick={(event) => event.stopPropagation()}
+                            type="button"
+                          >
+                            {breadcrumb.label}
+                          </button>
+                        </span>
+                      ))
                   ) : (
                     <button
                       className="breadcrumb-button muted"
@@ -2001,7 +2094,7 @@ export function App() {
           </div>
 
           {explorer.currentPath ? (
-            <div className="file-table-wrap">
+            <div className="file-table-wrap" onContextMenu={openFolderContextMenu}>
               <table className="file-table" style={{ width: totalColumnWidth }}>
                 <colgroup>
                   <col style={{ width: settings.fileListColumns.name }} />
@@ -2157,17 +2250,17 @@ export function App() {
           ref={entryMenuRef}
           style={{ left: entryContextMenu.x, top: entryContextMenu.y }}
         >
-          {entryContextMenu.entry.type === 'file' ? (
+          {contextEntry?.type === 'file' ? (
             <>
               <button
                 className="context-menu-item"
-                onClick={() => openInTextEditor(entryContextMenu.entry)}
+                onClick={() => openInTextEditor(contextEntry)}
                 type="button"
               >
                 <Code2 size={15} />
                 Open in Text Editor
               </button>
-              {getConfiguredOpenWithPrograms(entryContextMenu.entry, settings).length > 0 ? (
+              {getConfiguredOpenWithPrograms(contextEntry, settings).length > 0 ? (
                 <button
                   className="context-menu-item submenu-item"
                   onClick={openOpenWithMenu}
@@ -2183,30 +2276,34 @@ export function App() {
               <div className="context-menu-separator" />
             </>
           ) : null}
-          <button
-            className="context-menu-item icon-menu-item"
-            onClick={() => openEntryRenameModal(entryContextMenu.entry)}
-            type="button"
-          >
-            <Edit3 size={15} />
-            Rename
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            className="context-menu-item"
-            onClick={() => copyEntryText(entryContextMenu.entry.path)}
-            type="button"
-          >
-            Copy Full Path to Clipboard
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => copyEntryText(entryContextMenu.entry.name)}
-            type="button"
-          >
-            Copy Filename to Clipboard
-          </button>
-          {entryContextMenu.entry.type === 'file' && entryContextMenu.entry.extension ? (
+          {contextEntry ? (
+            <>
+              <button
+                className="context-menu-item icon-menu-item"
+                onClick={() => openEntryRenameModal(contextEntry)}
+                type="button"
+              >
+                <Edit3 size={15} />
+                Rename
+              </button>
+              <div className="context-menu-separator" />
+              <button
+                className="context-menu-item"
+                onClick={() => copyEntryText(contextEntry.path)}
+                type="button"
+              >
+                Copy Full Path to Clipboard
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => copyEntryText(contextEntry.name)}
+                type="button"
+              >
+                Copy Filename to Clipboard
+              </button>
+            </>
+          ) : null}
+          {contextEntry?.type === 'file' && contextEntry.extension ? (
             <>
               <div className="context-menu-separator" />
               <button className="context-menu-item submenu-item" onClick={openFilterMenu} type="button">
@@ -2226,23 +2323,29 @@ export function App() {
             </span>
             <ChevronRight size={15} />
           </button>
-          <div className="context-menu-separator" />
-          <button
-            className="context-menu-item"
-            onClick={() => setClipboard('cut', entryContextMenu.entry)}
-            type="button"
-          >
-            <Scissors size={15} />
-            Cut
-          </button>
-          <button
-            className="context-menu-item"
-            onClick={() => setClipboard('copy', entryContextMenu.entry)}
-            type="button"
-          >
-            <ClipboardCopy size={15} />
-            Copy
-          </button>
+          {contextEntry ? (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                className="context-menu-item"
+                onClick={() => setClipboard('cut', contextEntry)}
+                type="button"
+              >
+                <Scissors size={15} />
+                Cut
+              </button>
+              <button
+                className="context-menu-item"
+                onClick={() => setClipboard('copy', contextEntry)}
+                type="button"
+              >
+                <ClipboardCopy size={15} />
+                Copy
+              </button>
+            </>
+          ) : (
+            <div className="context-menu-separator" />
+          )}
           <button
             className="context-menu-item"
             disabled={!clipboardState || !explorer.currentPath}
@@ -2252,23 +2355,27 @@ export function App() {
             <ClipboardPaste size={15} />
             Paste
           </button>
+          {contextEntry ? (
+            <>
+              <div className="context-menu-separator" />
+              <button
+                className="context-menu-item"
+                disabled={
+                  getContextEntries(contextEntry).length !== 1 ||
+                  getContextEntries(contextEntry)[0].type !== 'file'
+                }
+                onClick={() => duplicateFile(contextEntry)}
+                type="button"
+              >
+                <CopyPlus size={15} />
+                Duplicate File
+              </button>
+            </>
+          ) : null}
           <div className="context-menu-separator" />
           <button
             className="context-menu-item"
-            disabled={
-              getContextEntries(entryContextMenu.entry).length !== 1 ||
-              getContextEntries(entryContextMenu.entry)[0].type !== 'file'
-            }
-            onClick={() => duplicateFile(entryContextMenu.entry)}
-            type="button"
-          >
-            <CopyPlus size={15} />
-            Duplicate File
-          </button>
-          <div className="context-menu-separator" />
-          <button
-            className="context-menu-item"
-            onClick={() => openInCmd(entryContextMenu.entry)}
+            onClick={() => openInCmd(contextEntry?.path ?? explorer.currentPath)}
             type="button"
           >
             <Terminal size={15} />
@@ -2276,7 +2383,7 @@ export function App() {
           </button>
           <button
             className="context-menu-item"
-            onClick={() => openInExplorer(entryContextMenu.entry)}
+            onClick={() => openInExplorer(contextEntry?.path ?? explorer.currentPath)}
             type="button"
           >
             <ExternalLink size={15} />
@@ -2286,20 +2393,21 @@ export function App() {
       ) : null}
 
       {entryContextMenu &&
+      contextEntry &&
       isOpenWithMenuOpen &&
       openWithMenuPosition &&
-      getConfiguredOpenWithPrograms(entryContextMenu.entry, settings).length > 0 ? (
+      getConfiguredOpenWithPrograms(contextEntry, settings).length > 0 ? (
         <div
           className="context-menu open-with-context-menu"
           onClick={(event) => event.stopPropagation()}
           ref={openWithMenuRef}
           style={{ left: openWithMenuPosition.x, top: openWithMenuPosition.y }}
         >
-          {getConfiguredOpenWithPrograms(entryContextMenu.entry, settings).map((programPath) => (
+          {getConfiguredOpenWithPrograms(contextEntry, settings).map((programPath) => (
             <button
               className="context-menu-item"
               key={programPath}
-              onClick={() => openWithConfiguredProgram(entryContextMenu.entry, programPath)}
+              onClick={() => openWithConfiguredProgram(contextEntry, programPath)}
               type="button"
             >
               <ExternalLink size={15} />
@@ -2310,10 +2418,11 @@ export function App() {
       ) : null}
 
       {entryContextMenu &&
+      contextEntry &&
       isFilterMenuOpen &&
       filterMenuPosition &&
-      entryContextMenu.entry.type === 'file' &&
-      entryContextMenu.entry.extension ? (
+      contextEntry.type === 'file' &&
+      contextEntry.extension ? (
         <div
           className="context-menu filter-context-menu"
           onClick={(event) => event.stopPropagation()}
