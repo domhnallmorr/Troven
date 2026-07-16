@@ -5,6 +5,7 @@ import {
   formatSize,
   getBreadcrumbs,
   getDefaultTabName,
+  getVisibleBreadcrumbs,
   getOpenWithProgramList,
   getProgramLabel,
   truncateText,
@@ -51,6 +52,33 @@ describe('getDefaultTabName', () => {
 
   it('keeps drive root labels readable', () => {
     expect(getDefaultTabName('C:\\')).toBe('C:\\')
+  })
+})
+
+describe('getVisibleBreadcrumbs', () => {
+  const breadcrumbs = getBreadcrumbs('C:\\Users\\domhn\\Documents\\troven')
+
+  it('keeps all breadcrumbs when the bar is wide enough', () => {
+    expect(getVisibleBreadcrumbs(breadcrumbs, 1200).map((item) => item.breadcrumb.label)).toEqual([
+      'C:\\',
+      'Users',
+      'domhn',
+      'Documents',
+      'troven',
+    ])
+  })
+
+  it('drops high-level breadcrumbs first when space is tight', () => {
+    expect(getVisibleBreadcrumbs(breadcrumbs, 200).map((item) => item.breadcrumb.label)).toEqual([
+      'Documents',
+      'troven',
+    ])
+  })
+
+  it('always keeps the final breadcrumb even in very narrow space', () => {
+    expect(getVisibleBreadcrumbs(breadcrumbs, 20).map((item) => item.breadcrumb.label)).toEqual([
+      'troven',
+    ])
   })
 })
 

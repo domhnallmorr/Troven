@@ -484,7 +484,6 @@ button:focus-visible {
 
 .breadcrumb-bar {
   display: flex;
-  flex-direction: row-reverse;
   min-width: 0;
   align-items: center;
   min-height: 26px;

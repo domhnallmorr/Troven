@@ -3,6 +3,11 @@ export type Breadcrumb = {
   path: string
 }
 
+export type VisibleBreadcrumb = {
+  breadcrumb: Breadcrumb
+  index: number
+}
+
 export function getBreadcrumbs(currentPath: string): Breadcrumb[] {
   if (!currentPath) {
     return []
@@ -66,6 +71,42 @@ export function truncateText(value: string, maxLength: number) {
   }
 
   return `${value.slice(0, Math.max(0, maxLength - 3))}...`
+}
+
+export function getVisibleBreadcrumbs(
+  breadcrumbs: Breadcrumb[],
+  availableWidth: number,
+): VisibleBreadcrumb[] {
+  if (breadcrumbs.length === 0) {
+    return []
+  }
+
+  if (availableWidth <= 0) {
+    return breadcrumbs.map((breadcrumb, index) => ({ breadcrumb, index }))
+  }
+
+  const estimateWidth = (breadcrumb: Breadcrumb, index: number) => {
+    const labelWidth = Math.min(260, Math.max(36, breadcrumb.label.length * 8 + 18))
+    const separatorWidth = index > 0 ? 16 : 0
+    return labelWidth + separatorWidth
+  }
+
+  const visible: VisibleBreadcrumb[] = []
+  let usedWidth = 0
+
+  for (let index = breadcrumbs.length - 1; index >= 0; index -= 1) {
+    const breadcrumb = breadcrumbs[index]
+    const nextWidth = estimateWidth(breadcrumb, index)
+
+    if (visible.length > 0 && usedWidth + nextWidth > availableWidth) {
+      break
+    }
+
+    visible.unshift({ breadcrumb, index })
+    usedWidth += nextWidth
+  }
+
+  return visible
 }
 
 export function formatSize(size: number | null) {

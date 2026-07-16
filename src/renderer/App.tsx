@@ -48,6 +48,7 @@ import {
   getDefaultTabName,
   getOpenWithProgramList,
   getProgramLabel,
+  getVisibleBreadcrumbs,
   truncateText,
 } from './explorerUtils'
 
@@ -251,11 +252,13 @@ export function App() {
   const [draftColumnWidths, setDraftColumnWidths] = useState<TrovenSettings['fileListColumns']>(
     defaultSettings.fileListColumns,
   )
+  const [breadcrumbBarWidth, setBreadcrumbBarWidth] = useState(0)
   const tabMenuRef = useRef<HTMLDivElement | null>(null)
   const entryMenuRef = useRef<HTMLDivElement | null>(null)
   const filterMenuRef = useRef<HTMLDivElement | null>(null)
   const newMenuRef = useRef<HTMLDivElement | null>(null)
   const openWithMenuRef = useRef<HTMLDivElement | null>(null)
+  const breadcrumbBarRef = useRef<HTMLDivElement | null>(null)
   const diaryEditorRef = useRef<HTMLDivElement | null>(null)
   const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? tabs[0]
   const explorer = activeTab.explorer
@@ -499,6 +502,26 @@ export function App() {
       setOpenWithMenuPosition(nextPosition)
     }
   }, [openWithMenuPosition])
+
+  useLayoutEffect(() => {
+    const breadcrumbBar = breadcrumbBarRef.current
+
+    if (!breadcrumbBar) {
+      return
+    }
+
+    const updateWidth = () => {
+      setBreadcrumbBarWidth(breadcrumbBar.getBoundingClientRect().width)
+    }
+    const resizeObserver = new ResizeObserver(updateWidth)
+
+    updateWidth()
+    resizeObserver.observe(breadcrumbBar)
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [isEditingPath])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -1318,6 +1341,10 @@ export function App() {
   }
 
   const breadcrumbs = useMemo(() => getBreadcrumbs(explorer.currentPath), [explorer.currentPath])
+  const visibleBreadcrumbs = useMemo(
+    () => getVisibleBreadcrumbs(breadcrumbs, breadcrumbBarWidth),
+    [breadcrumbBarWidth, breadcrumbs],
+  )
   const defaultTabName = useMemo(() => getDefaultTabName(explorer.currentPath), [explorer.currentPath])
   const contextEntry = entryContextMenu?.entry ?? null
 
@@ -2042,6 +2069,7 @@ export function App() {
                 <div
                   className="breadcrumb-bar"
                   onDoubleClick={() => setIsEditingPath(true)}
+                  ref={breadcrumbBarRef}
                   role="button"
                   tabIndex={0}
                   title="Double-click to edit path"
@@ -2052,24 +2080,21 @@ export function App() {
                   }}
                 >
                   {breadcrumbs.length > 0 ? (
-                    breadcrumbs
-                      .map((breadcrumb, index) => ({ breadcrumb, index }))
-                      .reverse()
-                      .map(({ breadcrumb, index }) => (
-                        <span className="breadcrumb-part" key={`${breadcrumb.path}-${index}`}>
-                          {index > 0 ? (
-                            <ChevronRight className="breadcrumb-separator" size={14} />
-                          ) : null}
-                          <button
-                            className="breadcrumb-button"
-                            onClick={() => loadDirectory(breadcrumb.path, { pushHistory: true })}
-                            onDoubleClick={(event) => event.stopPropagation()}
-                            type="button"
-                          >
-                            {breadcrumb.label}
-                          </button>
-                        </span>
-                      ))
+                    visibleBreadcrumbs.map(({ breadcrumb, index }) => (
+                      <span className="breadcrumb-part" key={`${breadcrumb.path}-${index}`}>
+                        {index > 0 ? (
+                          <ChevronRight className="breadcrumb-separator" size={14} />
+                        ) : null}
+                        <button
+                          className="breadcrumb-button"
+                          onClick={() => loadDirectory(breadcrumb.path, { pushHistory: true })}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          type="button"
+                        >
+                          {breadcrumb.label}
+                        </button>
+                      </span>
+                    ))
                   ) : (
                     <button
                       className="breadcrumb-button muted"
