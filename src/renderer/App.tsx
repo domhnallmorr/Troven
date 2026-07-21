@@ -1559,6 +1559,25 @@ export function App() {
     setEntryContextMenu(null)
   }
 
+  async function copyCurrentDirectoryPath() {
+    if (!explorer.currentPath) {
+      return
+    }
+
+    await window.troven.writeClipboardText(explorer.currentPath)
+  }
+
+  function clearFolderSelection(event: MouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement | null
+
+    if (target?.closest('tbody tr') || target?.closest('thead')) {
+      return
+    }
+
+    setSelectedEntryPaths([])
+    setLastSelectedEntryPath(null)
+  }
+
   function selectEntry(entry: FileEntry, event: MouseEvent<HTMLTableRowElement>) {
     if (event.shiftKey && lastSelectedEntryPath) {
       const startIndex = sortedEntries.findIndex((candidate) => candidate.path === lastSelectedEntryPath)
@@ -1604,17 +1623,26 @@ export function App() {
       return
     }
 
+    const currentClipboard = clipboardState
+    setEntryContextMenu(null)
+    setIsFilterMenuOpen(false)
+    setFilterMenuPosition(null)
+    setIsNewMenuOpen(false)
+    setNewMenuPosition(null)
+    setIsOpenWithMenuOpen(false)
+    setOpenWithMenuPosition(null)
+
     try {
       const pastedPaths = await window.troven.pasteEntries(
         explorer.currentPath,
-        clipboardState.operation,
-        clipboardState.entries.map((entry) => entry.path),
+        currentClipboard.operation,
+        currentClipboard.entries.map((entry) => entry.path),
       )
       await loadDirectory(explorer.currentPath)
       setSelectedEntryPaths(pastedPaths)
       setLastSelectedEntryPath(pastedPaths.at(-1) ?? null)
 
-      if (clipboardState.operation === 'cut') {
+      if (currentClipboard.operation === 'cut') {
         setClipboardState(null)
       }
     } catch (error) {
@@ -2068,11 +2096,11 @@ export function App() {
               ) : (
                 <div
                   className="breadcrumb-bar"
-                  onDoubleClick={() => setIsEditingPath(true)}
+                  onClick={() => setIsEditingPath(true)}
                   ref={breadcrumbBarRef}
                   role="button"
                   tabIndex={0}
-                  title="Double-click to edit path"
+                  title="Click to edit path"
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       setIsEditingPath(true)
@@ -2087,7 +2115,10 @@ export function App() {
                         ) : null}
                         <button
                           className="breadcrumb-button"
-                          onClick={() => loadDirectory(breadcrumb.path, { pushHistory: true })}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void loadDirectory(breadcrumb.path, { pushHistory: true })
+                          }}
                           onDoubleClick={(event) => event.stopPropagation()}
                           type="button"
                         >
@@ -2108,6 +2139,15 @@ export function App() {
               )}
             </form>
             <button
+              className="icon-button"
+              disabled={!explorer.currentPath}
+              onClick={copyCurrentDirectoryPath}
+              title="Copy current path"
+              type="button"
+            >
+              <ClipboardCopy size={16} />
+            </button>
+            <button
               className="search-pill"
               disabled={!explorer.currentPath}
               onClick={openSearchModal}
@@ -2119,7 +2159,11 @@ export function App() {
           </div>
 
           {explorer.currentPath ? (
-            <div className="file-table-wrap" onContextMenu={openFolderContextMenu}>
+            <div
+              className="file-table-wrap"
+              onClick={clearFolderSelection}
+              onContextMenu={openFolderContextMenu}
+            >
               <table className="file-table" style={{ width: totalColumnWidth }}>
                 <colgroup>
                   <col style={{ width: settings.fileListColumns.name }} />
