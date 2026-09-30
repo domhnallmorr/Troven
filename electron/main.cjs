@@ -3,7 +3,7 @@ const { spawn } = require('node:child_process')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const JSZip = require('jszip')
-const { PDFDocument } = require('pdf-lib')
+const { getPdfPageCount, extractPdfPages, mergePdfFiles } = require('./pdfUtils.cjs')
 const { createDataStore } = require('./dataStore.cjs')
 const { getVisibleDirectoryEntries } = require('./fileSystemUtils.cjs')
 
@@ -29,74 +29,6 @@ const {
   updateSettings,
   writeDiaryEntry,
 } = dataStore
-
-async function getPdfPageCount(pdfPath) {
-  const pdfBytes = await fs.readFile(pdfPath)
-  const pdfDocument = await PDFDocument.load(pdfBytes)
-  return pdfDocument.getPageCount()
-}
-
-async function extractPdfPages(sourcePath, outputPath, startPage, endPage) {
-  const firstPage = Number(startPage)
-  const lastPage = Number(endPage)
-
-  if (!sourcePath || !outputPath) {
-    throw new Error('Source and output PDF paths are required.')
-  }
-
-  if (!Number.isInteger(firstPage) || !Number.isInteger(lastPage) || firstPage < 1 || lastPage < firstPage) {
-    throw new Error('Invalid page range.')
-  }
-
-  const sourceBytes = await fs.readFile(sourcePath)
-  const sourceDocument = await PDFDocument.load(sourceBytes)
-  const pageCount = sourceDocument.getPageCount()
-
-  if (lastPage > pageCount) {
-    throw new Error(`Page range exceeds PDF page count (${pageCount}).`)
-  }
-
-  const outputDocument = await PDFDocument.create()
-  const pageIndexes = Array.from({ length: lastPage - firstPage + 1 }, (_value, index) => firstPage - 1 + index)
-  const copiedPages = await outputDocument.copyPages(sourceDocument, pageIndexes)
-
-  for (const page of copiedPages) {
-    outputDocument.addPage(page)
-  }
-
-  const outputBytes = await outputDocument.save()
-  await fs.writeFile(outputPath, outputBytes)
-  return outputPath
-}
-
-async function mergePdfFiles(sourcePaths, outputPath) {
-  if (!Array.isArray(sourcePaths) || sourcePaths.length === 0) {
-    throw new Error('At least one PDF path is required.')
-  }
-
-  if (!outputPath) {
-    throw new Error('Output PDF path is required.')
-  }
-
-  const outputDocument = await PDFDocument.create()
-
-  for (const sourcePath of sourcePaths) {
-    const pdfBytes = await fs.readFile(sourcePath)
-    const sourceDocument = await PDFDocument.load(pdfBytes)
-    const copiedPages = await outputDocument.copyPages(
-      sourceDocument,
-      sourceDocument.getPageIndices(),
-    )
-
-    for (const page of copiedPages) {
-      outputDocument.addPage(page)
-    }
-  }
-
-  const outputBytes = await outputDocument.save()
-  await fs.writeFile(outputPath, outputBytes)
-  return outputPath
-}
 
 function openSettingsModal(kind) {
   for (const win of BrowserWindow.getAllWindows()) {

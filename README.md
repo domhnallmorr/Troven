@@ -26,6 +26,8 @@ It is intended for switching between work projects during the day while keeping 
 
 Rust is not required.
 
+PDF tools support encrypted PDFs that open without a password, including PDFs with editing restrictions added during e-signing. Decryption runs locally. PDFs that require an opening password must first be saved as an unlocked copy in a PDF application. Extraction and merging create a separate document; the output does not retain the original document's digital signature validity. Keep the signed original for verification.
+
 ## Installation
 
 Clone or download the repository, then open a terminal in the Troven folder and install dependencies:
